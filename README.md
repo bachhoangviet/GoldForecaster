@@ -82,7 +82,15 @@ python main.py --show-data
 | `GEMINI_API_KEY` | Yes (AI) | Gemini Flash API key |
 | `FRED_API_KEY` | Yes (macro) | FRED macro series key |
 | `DATABASE_PATH` | No | SQLite path (default `data/goldforecaster.db`) |
-| `GEMINI_MODEL` | No | Default `gemini-2.5-flash` |
+| `GEMINI_MODEL` | No | Default model fallback (`gemini-2.5-flash`) |
+| `GEMINI_SUMMARIZE_MODELS` | No | Comma-separated summarize chain; rotates on 429 |
+| `GEMINI_FORECAST_MODELS` | No | Comma-separated forecast chain; rotates on 429 |
+| `GEMINI_SUMMARIZE_MODEL` | No | Primary summarize model (legacy fallback) |
+| `GEMINI_FORECAST_MODEL` | No | Primary forecast model (legacy fallback) |
+| `SUMMARIZE_BATCH_LIMIT` | No | Max articles per summarize run (default `100`) |
+| `GEMINI_REQUEST_DELAY_SECONDS` | No | Pause between Gemini calls (default `8`) |
+| `GEMINI_RATE_LIMIT_COOLDOWN_SECONDS` | No | Extra pause after 429 recovery (default `30`) |
+| `GEMINI_MODEL_COOLDOWN_SECONDS` | No | Per-model cooldown after 429 before retry (default `300`) |
 | `API_HOST` / `API_PORT` | No | FastAPI bind (default `127.0.0.1:8000`) |
 | `NEXT_PUBLIC_API_URL` | No | Frontend API base (default `http://127.0.0.1:8000`) |
 

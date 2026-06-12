@@ -35,6 +35,10 @@ class GeminiRateLimitError(GeminiClientError):
     """API rate limit exceeded."""
 
 
+class GeminiUnavailableError(GeminiClientError):
+    """Model temporarily unavailable (503 / high demand)."""
+
+
 @dataclass
 class PingResult:
     model: str
@@ -50,6 +54,10 @@ def _map_exception(exc: Exception) -> GeminiClientError:
             return GeminiRateLimitError(
                 "Gemini API rate limit reached. Retry later or check AI Studio quota."
             )
+        if exc.code == 503 or "unavailable" in lowered or "high demand" in lowered:
+            return GeminiUnavailableError(
+                "Gemini model is temporarily unavailable. Retry later or use fallback model."
+            )
         if exc.code in (401, 403) or "api key" in lowered or "permission" in lowered:
             return GeminiAuthError(
                 "Gemini API key is invalid or missing. Set GEMINI_API_KEY in .env."
@@ -61,6 +69,10 @@ def _map_exception(exc: Exception) -> GeminiClientError:
     if "429" in message or "resource_exhausted" in lowered:
         return GeminiRateLimitError(
             "Gemini API rate limit reached. Retry later or check AI Studio quota."
+        )
+    if "503" in message or "unavailable" in lowered:
+        return GeminiUnavailableError(
+            "Gemini model is temporarily unavailable. Retry later or use fallback model."
         )
     if "api key" in lowered or "unauthorized" in lowered:
         return GeminiAuthError(
@@ -109,16 +121,20 @@ class GeminiClient:
         system_instruction: str | None = None,
         temperature: float = 0.2,
         max_retries: int = 5,
+        max_parse_retries: int = 2,
     ) -> T:
         """Generate structured JSON and validate with a Pydantic model."""
         config = types.GenerateContentConfig(
             temperature=temperature,
             response_mime_type="application/json",
+            response_schema=schema_model,
             system_instruction=system_instruction,
         )
         last_error: Exception | None = None
+        parse_attempts = 0
+        rate_limit_attempts = 0
 
-        for attempt in range(1, max_retries + 1):
+        while rate_limit_attempts < max_retries:
             try:
                 response = self._client.models.generate_content(
                     model=self.model,
@@ -131,28 +147,44 @@ class GeminiClient:
                 payload = json.loads(raw)
                 return schema_model.model_validate(payload)
             except json.JSONDecodeError as exc:
+                parse_attempts += 1
                 last_error = GeminiClientError(f"Invalid JSON from Gemini: {exc}")
+                if parse_attempts >= max_parse_retries:
+                    raise last_error
+                logger.warning(
+                    "Invalid JSON from Gemini — retry %d/%d",
+                    parse_attempts,
+                    max_parse_retries,
+                )
+                time.sleep(2 * parse_attempts)
             except ValidationError as exc:
+                parse_attempts += 1
                 last_error = GeminiClientError(f"Schema validation failed: {exc}")
+                if parse_attempts >= max_parse_retries:
+                    raise last_error
+                logger.warning(
+                    "Schema validation failed — retry %d/%d",
+                    parse_attempts,
+                    max_parse_retries,
+                )
+                time.sleep(2 * parse_attempts)
             except Exception as exc:  # noqa: BLE001
                 mapped = _map_exception(exc)
                 if isinstance(mapped, GeminiRateLimitError):
+                    rate_limit_attempts += 1
                     last_error = mapped
-                    if attempt < max_retries:
-                        wait = min(90, 20 * attempt)
+                    if rate_limit_attempts < max_retries:
+                        wait = min(90, 20 * rate_limit_attempts)
                         logger.warning(
                             "Gemini 429 rate limit — retry %d/%d in %ds",
-                            attempt,
+                            rate_limit_attempts,
                             max_retries,
                             wait,
                         )
                         time.sleep(wait)
                         continue
                     raise mapped from exc
-                last_error = mapped
-
-            if attempt < max_retries:
-                time.sleep(2 * attempt)
+                raise mapped from exc
 
         assert last_error is not None
         raise last_error

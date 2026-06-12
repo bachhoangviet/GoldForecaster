@@ -7,10 +7,16 @@ import type { ForecastHorizon, Horizon, Trend } from "@/lib/api";
 const HORIZONS: Horizon[] = ["day", "week", "month", "quarter"];
 
 const HORIZON_LABELS: Record<Horizon, string> = {
-  day: "Day",
-  week: "Week",
-  month: "Month",
-  quarter: "Quarter",
+  day: "Ngày",
+  week: "Tuần",
+  month: "Tháng",
+  quarter: "Quý",
+};
+
+const TREND_LABELS: Record<Trend, string> = {
+  up: "Tăng",
+  down: "Giảm",
+  sideways: "Đi ngang",
 };
 
 function trendIcon(trend: Trend) {
@@ -51,7 +57,7 @@ export function ForecastWidget({
   if (loading) {
     return (
       <div className="panel flex h-full min-h-[320px] items-center justify-center text-slate-400">
-        Loading forecast...
+        Đang tải dự báo...
       </div>
     );
   }
@@ -59,8 +65,8 @@ export function ForecastWidget({
   if (!horizons.length || !selected) {
     return (
       <div className="panel flex h-full min-h-[320px] flex-col items-center justify-center gap-2 text-center text-slate-400">
-        <p>No AI forecast yet.</p>
-        <p className="text-sm">Run `python main.py --run-pipeline --skip-scrape`</p>
+        <p>Chưa có dự báo AI.</p>
+        <p className="text-sm">Chạy `python main.py --forecast`</p>
       </div>
     );
   }
@@ -69,9 +75,9 @@ export function ForecastWidget({
     <div className="panel flex h-full min-h-[320px] flex-col p-5">
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold text-gold-bright">AI Forecast</h2>
+          <h2 className="text-lg font-semibold text-gold-bright">Dự báo AI</h2>
           {createdAt && (
-            <p className="text-xs text-slate-500">Updated {createdAt}</p>
+            <p className="text-xs text-slate-500">Cập nhật {createdAt}</p>
           )}
         </div>
         <div className="flex gap-1 rounded-lg bg-slate-950/70 p-1">
@@ -99,17 +105,17 @@ export function ForecastWidget({
           </span>
           <div>
             <p className="text-sm uppercase tracking-wide text-slate-400">
-              {HORIZON_LABELS[selected.horizon]} trend
+              Xu hướng {HORIZON_LABELS[selected.horizon].toLowerCase()}
             </p>
-            <p className={`text-2xl font-semibold capitalize ${trendColor(selected.trend)}`}>
-              {selected.trend}
+            <p className={`text-2xl font-semibold ${trendColor(selected.trend)}`}>
+              {TREND_LABELS[selected.trend]}
             </p>
           </div>
         </div>
 
         <div>
           <div className="mb-1 flex justify-between text-xs text-slate-400">
-            <span>Confidence</span>
+            <span>Độ tin cậy</span>
             <span>{selected.confidence}%</span>
           </div>
           <div className="h-2 overflow-hidden rounded-full bg-slate-800">

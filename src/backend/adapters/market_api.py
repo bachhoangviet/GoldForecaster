@@ -59,8 +59,21 @@ async def fetch_fred_macro() -> tuple[float | None, float | None]:
     return dxy, us10y
 
 
+def _is_plausible_gold_spot(value: float | None) -> bool:
+    return value is not None and 800 <= value <= 10_000
+
+
 def _parse_gold_price(html: str) -> float | None:
     soup = BeautifulSoup(html, "html.parser")
+
+    kitco_mid = re.search(
+        r'"high"\s*:\s*([\d.]+)\s*,\s*"low"\s*:\s*([\d.]+)\s*,\s*"mid"\s*:\s*([\d.]+)',
+        html,
+    )
+    if kitco_mid:
+        mid = _extract_number(kitco_mid.group(3))
+        if _is_plausible_gold_spot(mid):
+            return mid
 
     selectors = [
         "#sp-bid",
@@ -72,20 +85,34 @@ def _parse_gold_price(html: str) -> float | None:
         node = soup.select_one(selector)
         if node:
             value = _extract_number(node.get_text(" ", strip=True))
-            if value is not None:
+            if _is_plausible_gold_spot(value):
                 return value
 
     text = soup.get_text(" ", strip=True)
     match = re.search(r"Gold.*?\$\s*([\d,]+\.?\d*)", text, re.IGNORECASE)
     if match:
-        return _extract_number(match.group(1))
+        value = _extract_number(match.group(1))
+        if _is_plausible_gold_spot(value):
+            return value
 
-    for script in soup.find_all("script"):
-        content = script.string or ""
-        match = re.search(r'"bid"\s*:\s*([\d.]+)', content)
-        if match:
-            return float(match.group(1))
+    return None
 
+
+def _fetch_yfinance_gold_spot() -> float | None:
+    try:
+        ticker = yf.Ticker("GC=F")
+        fast_info = getattr(ticker, "fast_info", None)
+        if fast_info is not None:
+            last_price = getattr(fast_info, "last_price", None)
+            if _is_plausible_gold_spot(last_price):
+                return float(last_price)
+        info = ticker.info
+        for key in ("regularMarketPrice", "previousClose"):
+            candidate = info.get(key)
+            if _is_plausible_gold_spot(candidate):
+                return float(candidate)
+    except Exception:
+        return None
     return None
 
 
@@ -100,7 +127,10 @@ def _extract_number(raw: str) -> float | None:
 @retry_request()
 def fetch_kitco_gold_spot() -> float | None:
     html = fetch_html(KITCO_GOLD_URL)
-    return _parse_gold_price(html)
+    price = _parse_gold_price(html)
+    if _is_plausible_gold_spot(price):
+        return price
+    return _fetch_yfinance_gold_spot()
 
 
 @retry_request()

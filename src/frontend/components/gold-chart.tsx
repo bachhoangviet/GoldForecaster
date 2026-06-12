@@ -18,10 +18,12 @@ interface GoldChartProps {
 }
 
 function toChartData(points: MacroHistoryPoint[]): LineData<Time>[] {
-  return points.map((point) => ({
-    time: point.recorded_at.slice(0, 10) as Time,
-    value: point.gold_spot,
-  }));
+  return points
+    .filter((point) => point.gold_spot >= 800)
+    .map((point) => ({
+      time: point.recorded_at.slice(0, 10) as Time,
+      value: point.gold_spot,
+    }));
 }
 
 export function GoldChart({ points, loading }: GoldChartProps) {
@@ -91,8 +93,8 @@ export function GoldChart({ points, loading }: GoldChartProps) {
   if (!points.length) {
     return (
       <div className="panel flex h-[320px] flex-col items-center justify-center gap-2 text-center text-slate-400">
-        <p>No gold price history yet.</p>
-        <p className="text-sm">Run `python main.py --run-scraper --macro-only`</p>
+        <p>Chưa có lịch sử giá vàng.</p>
+        <p className="text-sm">Chạy `python main.py --run-scraper --macro-only`</p>
       </div>
     );
   }

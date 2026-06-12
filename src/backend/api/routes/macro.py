@@ -17,8 +17,11 @@ def macro_latest() -> MacroLatestResponse:
     row = get_latest_macro()
     if not row:
         return MacroLatestResponse()
+    gold_spot = row.get("gold_spot")
+    if gold_spot is not None and float(gold_spot) < 800:
+        gold_spot = None
     return MacroLatestResponse(
-        gold_spot=row.get("gold_spot"),
+        gold_spot=gold_spot,
         dxy=row.get("dxy"),
         us10y=row.get("us10y"),
         spdr_holdings=row.get("spdr_holdings"),
@@ -37,5 +40,6 @@ def macro_history(days: int = Query(default=30, ge=1, le=365)) -> MacroHistoryRe
             us10y=float(row["us10y"]) if row.get("us10y") is not None else None,
         )
         for row in rows
+        if row.get("gold_spot") is not None and float(row["gold_spot"]) >= 800
     ]
     return MacroHistoryResponse(days=days, points=points)

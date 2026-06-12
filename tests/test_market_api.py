@@ -30,6 +30,16 @@ def test_parse_gold_price_from_text_fallback():
     assert _parse_gold_price(html) == 1980.25
 
 
+def test_parse_gold_price_from_kitco_mid_json():
+    html = '{"high":4247.3,"low":4169.4,"mid":4189.7,"bid":1.4214}'
+    assert _parse_gold_price(html) == 4189.7
+
+
+def test_parse_gold_price_rejects_percent_bid():
+    html = '<html><script>"bid":1.4214</script></html>'
+    assert _parse_gold_price(html) is None
+
+
 def test_fetch_fred_macro_missing_key(monkeypatch):
     monkeypatch.setenv("FRED_API_KEY", "")
     get_settings.cache_clear()

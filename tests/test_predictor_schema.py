@@ -60,11 +60,11 @@ def test_run_predictor_skips_when_cached(tmp_path, monkeypatch):
             """
         )
 
-    with patch("src.backend.services.predictor.GeminiClient") as mock_client_cls:
+    with patch("src.backend.services.predictor.GeminiModelPool") as mock_pool_cls:
         report = run_predictor()
 
     get_settings.cache_clear()
-    mock_client_cls.assert_not_called()
+    mock_pool_cls.assert_not_called()
     assert report.skipped_cached is True
 
 
@@ -86,8 +86,8 @@ def test_run_predictor_force_bypasses_cache(tmp_path, monkeypatch):
             """
         )
 
-    with patch("src.backend.services.predictor.GeminiClient") as mock_client_cls:
-        mock_client_cls.return_value.generate_json.return_value = _sample_forecast()
+    with patch("src.backend.services.predictor.GeminiModelPool") as mock_pool_cls:
+        mock_pool_cls.return_value.generate_json.return_value = _sample_forecast()
         report = run_predictor(force=True)
 
     get_settings.cache_clear()

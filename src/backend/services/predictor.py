@@ -7,7 +7,8 @@ from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
-from src.backend.adapters.gemini_client import GeminiClient
+from src.backend.adapters.gemini_client import GeminiClientError, GeminiRateLimitError
+from src.backend.adapters.gemini_model_pool import GeminiModelPool
 from src.backend.core.ai_models import ForecastResult
 from src.backend.core.config import get_settings
 from src.backend.core.database import (
@@ -121,15 +122,26 @@ def run_predictor(*, force: bool = False, new_summaries: int = 0) -> PredictRepo
             message="Forecast skipped — no summarized articles available.",
         )
 
-    logger.info("Forecast: calling Gemini for 4-horizon trend analysis...")
-    client = GeminiClient()
-    prompt = build_forecast_prompt()
-    result = client.generate_json(
-        prompt=prompt,
-        schema_model=ForecastResult,
-        system_instruction=FORECAST_SYSTEM_V1,
-        temperature=0.1,
+    settings = get_settings()
+    model_chain = settings.effective_forecast_models
+    logger.info(
+        "Forecast: model chain (%s) for 4-horizon trend analysis...",
+        " → ".join(model_chain),
     )
+    pool = GeminiModelPool(
+        model_chain,
+        cooldown_seconds=settings.gemini_model_cooldown_seconds,
+    )
+    prompt = build_forecast_prompt()
+    try:
+        result = pool.generate_json(
+            prompt=prompt,
+            schema_model=ForecastResult,
+            system_instruction=FORECAST_SYSTEM_V1,
+            temperature=0.1,
+        )
+    except (GeminiRateLimitError, GeminiClientError) as exc:
+        return PredictReport(message=f"Forecast failed: {exc}")
 
     with get_connection() as conn:
         insert_forecasts(

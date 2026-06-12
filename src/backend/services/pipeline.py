@@ -27,6 +27,7 @@ async def run_full_pipeline(
     macro_only: bool = False,
     force_forecast: bool = False,
     summarize_limit: int | None = None,
+    keep_old_articles: bool = False,
 ) -> PipelineReport:
     report = PipelineReport()
 
@@ -42,7 +43,10 @@ async def run_full_pipeline(
             return report
 
     try:
-        report.summarize = run_summarizer(limit=summarize_limit)
+        report.summarize = run_summarizer(
+            limit=summarize_limit,
+            clear_stale=not keep_old_articles,
+        )
     except Exception as exc:  # noqa: BLE001
         report.errors.append(f"Summarize failed: {exc}")
         return report

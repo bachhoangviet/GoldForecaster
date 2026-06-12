@@ -7,7 +7,10 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Generator
 
+from src.backend.core.article_quality import SKIPPED_SUMMARY_PREFIX
 from src.backend.core.config import get_settings
+
+TODAY_ARTICLES_SQL = "date(scraped_at) = date('now', 'localtime')"
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS articles (
@@ -58,6 +61,15 @@ CREATE TABLE IF NOT EXISTS scrape_runs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_scrape_runs_started_at ON scrape_runs(started_at);
+
+CREATE TABLE IF NOT EXISTS daily_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    report_json TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_daily_reports_created_at ON daily_reports(created_at);
 """
 
 
@@ -93,7 +105,7 @@ def get_connection(db_path: Path | None = None) -> Generator[sqlite3.Connection,
 
 def get_table_counts() -> dict[str, int]:
     """Return row counts for core tables (CLI/debug helper)."""
-    tables = ("articles", "macro_snapshots", "forecasts", "scrape_runs")
+    tables = ("articles", "macro_snapshots", "forecasts", "scrape_runs", "daily_reports")
     counts: dict[str, int] = {}
     with get_connection() as conn:
         for table in tables:
@@ -179,26 +191,40 @@ def get_latest_macro() -> dict[str, object] | None:
     return dict(row)
 
 
-def get_unsummarized_count() -> int:
+def delete_articles_before_today() -> int:
+    """Remove articles scraped on previous days so daily runs stay isolated."""
     with get_connection() as conn:
-        row = conn.execute(
-            "SELECT COUNT(*) AS c FROM articles WHERE summary IS NULL"
-        ).fetchone()
+        cursor = conn.execute(
+            """
+            DELETE FROM articles
+            WHERE date(scraped_at) < date('now', 'localtime')
+            """
+        )
+        conn.commit()
+        return int(cursor.rowcount)
+
+
+def get_unsummarized_count(*, today_only: bool = True) -> int:
+    query = "SELECT COUNT(*) AS c FROM articles WHERE summary IS NULL"
+    if today_only:
+        query += f" AND {TODAY_ARTICLES_SQL}"
+    with get_connection() as conn:
+        row = conn.execute(query).fetchone()
     return int(row["c"]) if row else 0
 
 
-def get_unsummarized_articles(limit: int = 20) -> list[dict[str, object]]:
+def get_unsummarized_articles(limit: int = 20, *, today_only: bool = True) -> list[dict[str, object]]:
+    query = """
+        SELECT id, source, title, body
+        FROM articles
+        WHERE summary IS NULL
+    """
+    if today_only:
+        query += f" AND {TODAY_ARTICLES_SQL}"
+    query += " ORDER BY scraped_at DESC LIMIT ?"
+
     with get_connection() as conn:
-        rows = conn.execute(
-            """
-            SELECT id, source, title, body
-            FROM articles
-            WHERE summary IS NULL
-            ORDER BY scraped_at DESC
-            LIMIT ?
-            """,
-            (limit,),
-        ).fetchall()
+        rows = conn.execute(query, (limit,)).fetchall()
     return [dict(row) for row in rows]
 
 
@@ -222,14 +248,16 @@ def update_article_summary(
 def get_recent_summarized_articles(limit: int = 10) -> list[dict[str, object]]:
     with get_connection() as conn:
         rows = conn.execute(
-            """
+            f"""
             SELECT source, title, summary, sentiment, scraped_at
             FROM articles
             WHERE summary IS NOT NULL
+              AND summary NOT LIKE ?
+              AND {TODAY_ARTICLES_SQL}
             ORDER BY scraped_at DESC
             LIMIT ?
             """,
-            (limit,),
+            (f"{SKIPPED_SUMMARY_PREFIX}%", limit),
         ).fetchall()
     return [dict(row) for row in rows]
 
@@ -264,7 +292,11 @@ def has_new_data_since_last_forecast() -> bool:
     if last is None:
         with get_connection() as conn:
             has_articles = conn.execute(
-                "SELECT 1 FROM articles WHERE summary IS NOT NULL LIMIT 1"
+                f"""
+                SELECT 1 FROM articles
+                WHERE summary IS NOT NULL AND {TODAY_ARTICLES_SQL}
+                LIMIT 1
+                """
             ).fetchone()
             has_macro = conn.execute(
                 "SELECT 1 FROM macro_snapshots LIMIT 1"
@@ -281,9 +313,11 @@ def has_new_data_since_last_forecast() -> bool:
             (last,),
         ).fetchone()
         new_summaries = conn.execute(
-            """
+            f"""
             SELECT 1 FROM articles
-            WHERE summary IS NOT NULL AND scraped_at > ?
+            WHERE summary IS NOT NULL
+              AND {TODAY_ARTICLES_SQL}
+              AND scraped_at > ?
             LIMIT 1
             """,
             (last,),
@@ -343,12 +377,14 @@ def get_summarized_articles(
     limit: int = 50,
     sentiment: str | None = None,
 ) -> list[dict[str, object]]:
-    query = """
+    query = f"""
         SELECT id, source, title, summary, sentiment, scraped_at, published_at
         FROM articles
         WHERE summary IS NOT NULL
+          AND summary NOT LIKE ?
+          AND {TODAY_ARTICLES_SQL}
     """
-    params: list[object] = []
+    params: list[object] = [f"{SKIPPED_SUMMARY_PREFIX}%"]
     if sentiment:
         query += " AND sentiment = ?"
         params.append(sentiment)
@@ -382,3 +418,28 @@ def get_latest_forecasts() -> list[dict[str, object]]:
             (last,),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def insert_daily_report(conn: sqlite3.Connection, *, title: str, report_json: str) -> None:
+    conn.execute(
+        """
+        INSERT INTO daily_reports (title, report_json)
+        VALUES (?, ?)
+        """,
+        (title, report_json),
+    )
+
+
+def get_latest_daily_report() -> dict[str, object] | None:
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT id, title, report_json, created_at
+            FROM daily_reports
+            ORDER BY created_at DESC
+            LIMIT 1
+            """
+        ).fetchone()
+    if not row:
+        return None
+    return dict(row)

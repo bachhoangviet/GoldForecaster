@@ -1,13 +1,16 @@
-"""APScheduler jobs for periodic news and macro ingestion."""
+"""APScheduler jobs for periodic news, macro, and daily report delivery."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
+from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 
+from src.backend.core.config import get_settings
+from src.backend.services.daily_job import run_daily_job
 from src.backend.services.ingestion import run_full_ingestion, run_macro_pipeline
 
 logger = logging.getLogger(__name__)
@@ -36,8 +39,20 @@ def _macro_job() -> None:
     logger.info("Macro ingestion done: saved=%s", report.macro_saved)
 
 
+def _daily_report_job() -> None:
+    logger.info("Starting scheduled daily report job")
+    report = run_daily_job()
+    if report.errors:
+        for error in report.errors:
+            logger.warning("Daily job: %s", error)
+    else:
+        logger.info("Daily job completed successfully")
+
+
 def start_scheduler() -> None:
-    """Blocking scheduler: news 4x/day, macro hourly."""
+    """Blocking scheduler: news 4x/day, macro hourly, daily report once per day."""
+    settings = get_settings()
+    tz = ZoneInfo(settings.daily_job_timezone)
     scheduler = BlockingScheduler()
     scheduler.add_job(
         _news_job,
@@ -53,5 +68,21 @@ def start_scheduler() -> None:
         max_instances=1,
         coalesce=True,
     )
-    logger.info("Scheduler started (news: 0/6/12/18 UTC, macro: hourly)")
+    scheduler.add_job(
+        _daily_report_job,
+        CronTrigger(
+            hour=settings.daily_job_hour,
+            minute=settings.daily_job_minute,
+            timezone=tz,
+        ),
+        id="daily-report",
+        max_instances=1,
+        coalesce=True,
+    )
+    logger.info(
+        "Scheduler started (news: 0/6/12/18 UTC, macro: hourly, daily: %02d:%02d %s)",
+        settings.daily_job_hour,
+        settings.daily_job_minute,
+        settings.daily_job_timezone,
+    )
     scheduler.start()

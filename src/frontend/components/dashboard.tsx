@@ -76,10 +76,15 @@ export function Dashboard() {
         </div>
         <div className="text-right text-sm text-slate-400">
           {lastRefresh && <p>Last refresh: {lastRefresh}</p>}
-          {macro?.gold_spot != null && (
-            <p className="font-mono text-lg text-gold-bright">
-              ${macro.gold_spot.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-            </p>
+          {macro?.gold_spot != null && macro.gold_spot >= 800 && (
+            <div>
+              <p className="text-xs uppercase tracking-wide text-slate-500">
+                Giá vàng spot (USD/oz)
+              </p>
+              <p className="font-mono text-lg text-gold-bright">
+                ${macro.gold_spot.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+              </p>
+            </div>
           )}
         </div>
       </header>
@@ -87,13 +92,13 @@ export function Dashboard() {
       <section className="mb-6 grid gap-6 lg:grid-cols-2">
         <div>
           <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-slate-400">
-            Gold Price
+            Giá vàng
           </h2>
           <GoldChart points={history} loading={loading} />
         </div>
         <div>
           <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-slate-400">
-            AI Outlook
+            Dự báo AI
           </h2>
           <ForecastWidget
             horizons={forecasts}

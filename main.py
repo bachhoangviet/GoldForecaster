@@ -27,10 +27,13 @@ from src.backend.core.database import (
 )
 from src.backend.core.models import ScrapeStatus
 from src.backend.services.ingestion import run_full_ingestion
+from src.backend.services.daily_job import run_daily_job
+from src.backend.services.daily_report import run_daily_report
 from src.backend.services.pipeline import run_full_pipeline
 from src.backend.services.predictor import run_predictor
 from src.backend.services.scheduler import start_scheduler
 from src.backend.services.summarizer import run_summarizer
+from src.backend.services.telegram_digest import send_daily_digest
 
 
 @click.group(invoke_without_command=True)
@@ -48,6 +51,11 @@ from src.backend.services.summarizer import run_summarizer
     help="Max articles to summarize per run (default: 20).",
 )
 @click.option(
+    "--keep-old-articles",
+    is_flag=True,
+    help="Keep articles from previous days when summarizing.",
+)
+@click.option(
     "--source",
     type=click.Choice(["kitco", "fed", "cnbc", "reuters", "bloomberg"]),
     help="Run a single news source (with --run-scraper/--run-pipeline).",
@@ -56,7 +64,27 @@ from src.backend.services.summarizer import run_summarizer
 @click.option("--macro-only", is_flag=True, help="Only ingest macro data.")
 @click.option("--show-data", is_flag=True, help="Show SQLite row counts and latest macro.")
 @click.option("--serve", is_flag=True, help="Start FastAPI server.")
-@click.option("--worker", is_flag=True, help="Start ingestion scheduler (blocking).")
+@click.option("--worker", is_flag=True, help="Start scheduler (ingest + daily report job).")
+@click.option(
+    "--run-daily-job",
+    is_flag=True,
+    help="Full daily job: ingest → summarize → báo cáo → Telegram.",
+)
+@click.option(
+    "--daily-report",
+    is_flag=True,
+    help="Generate detailed Vietnamese daily gold report.",
+)
+@click.option(
+    "--send-telegram",
+    is_flag=True,
+    help="Send latest daily forecast report to Telegram.",
+)
+@click.option(
+    "--skip-telegram",
+    is_flag=True,
+    help="Skip Telegram when using --run-daily-job.",
+)
 def cli(
     test_ai: bool,
     run_scraper: bool,
@@ -66,12 +94,17 @@ def cli(
     force_forecast: bool,
     skip_scrape: bool,
     summarize_limit: int | None,
+    keep_old_articles: bool,
     source: str | None,
     news_only: bool,
     macro_only: bool,
     show_data: bool,
     serve: bool,
     worker: bool,
+    run_daily_job: bool,
+    daily_report: bool,
+    send_telegram: bool,
+    skip_telegram: bool,
 ) -> None:
     """GoldForecaster command-line interface."""
     flags = (
@@ -83,6 +116,9 @@ def cli(
         show_data,
         serve,
         worker,
+        run_daily_job,
+        daily_report,
+        send_telegram,
     )
     if not any(flags):
         click.echo(ctx.get_help() if (ctx := click.get_current_context()) else "")
@@ -102,9 +138,10 @@ def cli(
             macro_only=macro_only,
             force_forecast=force_forecast,
             summarize_limit=summarize_limit,
+            keep_old_articles=keep_old_articles,
         )
     if summarize:
-        _run_summarize(limit=summarize_limit)
+        _run_summarize(limit=summarize_limit, keep_old_articles=keep_old_articles)
     if forecast:
         _run_forecast(force=force_forecast)
     if show_data:
@@ -113,32 +150,55 @@ def cli(
         _serve_api()
     if worker:
         _run_worker()
+    if run_daily_job:
+        _run_daily_job(skip_telegram=skip_telegram)
+    if daily_report:
+        _run_daily_report()
+    if send_telegram:
+        _run_send_telegram()
+
+
+def _ping_gemini_model(model: str) -> bool:
+    try:
+        client = GeminiClient(model=model)
+        result = client.ping()
+    except GeminiAuthError as exc:
+        click.echo(f"ERROR [{model}]: {exc}", err=True)
+        return False
+    except GeminiNetworkError as exc:
+        click.echo(f"ERROR [{model}]: {exc}", err=True)
+        return False
+    except GeminiRateLimitError as exc:
+        click.echo(f"RATE LIMITED [{model}]: {exc}", err=True)
+        return False
+    except GeminiClientError as exc:
+        click.echo(f"ERROR [{model}]: {exc}", err=True)
+        return False
+
+    snippet = result.response_text[:120]
+    click.echo(f"SUCCESS [{model}]: Gemini API is reachable.")
+    click.echo(f"Response: {snippet}{'...' if len(result.response_text) > 120 else ''}")
+    return True
 
 
 def _run_test_ai() -> None:
     settings = get_settings()
-    click.echo(f"Testing Gemini API ({settings.gemini_model})...")
+    chains = {
+        "summarize": settings.effective_summarize_models,
+        "forecast": settings.effective_forecast_models,
+    }
+    unique_models = list(
+        dict.fromkeys(model for chain in chains.values() for model in chain)
+    )
 
-    try:
-        client = GeminiClient()
-        result = client.ping()
-    except GeminiAuthError as exc:
-        click.echo(f"ERROR: {exc}", err=True)
-        sys.exit(1)
-    except GeminiNetworkError as exc:
-        click.echo(f"ERROR: {exc}", err=True)
-        sys.exit(1)
-    except GeminiRateLimitError as exc:
-        click.echo(f"ERROR: {exc}", err=True)
-        sys.exit(1)
-    except GeminiClientError as exc:
-        click.echo(f"ERROR: {exc}", err=True)
-        sys.exit(1)
+    click.echo("Testing Gemini API model chains...")
+    for role, chain in chains.items():
+        click.echo(f"  {role}: {' → '.join(chain)}")
 
-    snippet = result.response_text[:120]
-    click.echo("SUCCESS: Gemini API is reachable.")
-    click.echo(f"Model: {result.model}")
-    click.echo(f"Response: {snippet}{'...' if len(result.response_text) > 120 else ''}")
+    successes = sum(1 for model in unique_models if _ping_gemini_model(model))
+    if successes == 0:
+        click.echo("ERROR: No Gemini models reachable.", err=True)
+        sys.exit(1)
 
 
 def _run_scraper(
@@ -174,6 +234,7 @@ def _run_pipeline(
     macro_only: bool,
     force_forecast: bool,
     summarize_limit: int | None,
+    keep_old_articles: bool,
 ) -> None:
     settings = get_settings()
     limit = summarize_limit or settings.summarize_batch_limit
@@ -194,6 +255,7 @@ def _run_pipeline(
                 macro_only=macro_only,
                 force_forecast=force_forecast,
                 summarize_limit=summarize_limit,
+                keep_old_articles=keep_old_articles,
             )
         )
     except Exception as exc:  # noqa: BLE001
@@ -205,7 +267,9 @@ def _run_pipeline(
 
     if report.summarize:
         click.echo(
-            f"Summarize: processed={report.summarize.processed}, "
+            f"Summarize: cleared_stale={report.summarize.cleared_stale}, "
+            f"processed={report.summarize.processed}, "
+            f"skipped={report.summarize.skipped}, "
             f"failed={report.summarize.failed}, "
             f"remaining={report.summarize.remaining}"
         )
@@ -227,20 +291,20 @@ def _run_pipeline(
         sys.exit(1)
 
 
-def _run_summarize(*, limit: int | None) -> None:
+def _run_summarize(*, limit: int | None, keep_old_articles: bool) -> None:
     settings = get_settings()
     batch = limit or settings.summarize_batch_limit
     pending = get_unsummarized_count()
-    click.echo(f"Summarizing up to {batch} of {pending} pending article(s)...")
+    click.echo(f"Summarizing up to {batch} of {pending} pending article(s) (today only)...")
     try:
-        report = run_summarizer(limit=limit)
+        report = run_summarizer(limit=limit, clear_stale=not keep_old_articles)
     except GeminiClientError as exc:
         click.echo(f"ERROR: {exc}", err=True)
         sys.exit(1)
 
     click.echo(
-        f"Summarize: processed={report.processed}, failed={report.failed}, "
-        f"remaining={report.remaining}"
+        f"Summarize: cleared_stale={report.cleared_stale}, processed={report.processed}, "
+        f"skipped={report.skipped}, failed={report.failed}, remaining={report.remaining}"
     )
 
 
@@ -330,11 +394,61 @@ def _serve_api() -> None:
     )
 
 
+def _run_daily_job(*, skip_telegram: bool) -> None:
+    click.echo("Running daily job (ingest → summarize → báo cáo → Telegram)...")
+    report = run_daily_job(skip_telegram=skip_telegram)
+
+    if report.ingestion:
+        _print_ingestion_report(report.ingestion)
+    if report.summarize:
+        click.echo(
+            f"Summarize: cleared_stale={report.summarize.cleared_stale}, "
+            f"processed={report.summarize.processed}, skipped={report.summarize.skipped}, "
+            f"failed={report.summarize.failed}"
+        )
+    if report.daily_report:
+        click.echo(f"Daily report: {report.daily_report.message}")
+        if report.daily_report.saved:
+            _print_latest_forecasts()
+    if report.telegram and report.telegram.sent:
+        click.echo(report.telegram.message)
+
+    for error in report.errors:
+        click.echo(f"WARN: {error}", err=True)
+
+    if report.errors and not (report.daily_report and report.daily_report.saved):
+        sys.exit(1)
+
+
+def _run_daily_report() -> None:
+    click.echo("Generating detailed daily report (Vietnamese)...")
+    result = run_daily_report()
+    click.echo(result.message)
+    if result.saved:
+        _print_latest_forecasts()
+    elif "thất bại" in result.message or "bỏ qua" in result.message:
+        sys.exit(1)
+
+
+def _run_send_telegram() -> None:
+    click.echo("Sending daily digest to Telegram...")
+    result = send_daily_digest()
+    click.echo(result.message)
+    if not result.sent:
+        sys.exit(1)
+
+
 def _run_worker() -> None:
-    click.echo("Starting ingestion scheduler (Ctrl+C to stop)...")
+    click.echo("Starting scheduler (ingest + daily report at 07:00 VN, Ctrl+C to stop)...")
     start_scheduler()
 
 
 if __name__ == "__main__":
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8")
+            sys.stderr.reconfigure(encoding="utf-8")
+        except (AttributeError, OSError, ValueError):
+            pass
     configure_logging()
     cli()
