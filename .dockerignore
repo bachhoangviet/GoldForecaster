@@ -1,0 +1,13 @@
+.venv
+venv
+__pycache__
+.pytest_cache
+.git
+data
+*.db
+.env
+src/frontend/node_modules
+src/frontend/.next
+plans
+docs/journals
+.agents
