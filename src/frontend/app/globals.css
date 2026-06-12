@@ -1,0 +1,30 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  @apply min-h-screen bg-slate-950 text-slate-100 antialiased;
+  background-image:
+    radial-gradient(circle at top left, rgba(30, 58, 138, 0.25), transparent 40%),
+    radial-gradient(circle at bottom right, rgba(245, 158, 11, 0.08), transparent 35%);
+}
+
+.panel {
+  @apply rounded-xl border border-slate-800/80 bg-slate-900/70 backdrop-blur-sm shadow-lg shadow-black/20;
+}
+
+.badge-bullish {
+  @apply bg-emerald-500/15 text-emerald-400 ring-1 ring-emerald-500/30;
+}
+
+.badge-bearish {
+  @apply bg-rose-500/15 text-rose-400 ring-1 ring-rose-500/30;
+}
+
+.badge-neutral {
+  @apply bg-slate-500/15 text-slate-300 ring-1 ring-slate-500/30;
+}

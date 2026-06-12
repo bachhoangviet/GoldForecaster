@@ -1,0 +1,33 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environment & secrets
+.env
+.env.local
+
+# Database
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# Node (Phase 4)
+node_modules/
+.next/
+out/
+src/frontend/node_modules/
+src/frontend/.next/
+
+# IDE & OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
