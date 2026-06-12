@@ -74,6 +74,9 @@ python main.py --show-data
 | `python main.py --show-data` | Table counts + latest macro/forecast |
 | `python main.py --serve` | FastAPI on port 8000 |
 | `python main.py --worker` | Scheduler (news 4x/day, macro hourly) |
+| `python main.py --run-daily-job` | Full daily: ingest → summarize → báo cáo VI → Telegram |
+| `python main.py --daily-report` | Generate detailed Vietnamese forecast report only |
+| `python main.py --send-telegram` | Send latest forecast report to Telegram |
 
 ## Environment Variables
 
@@ -91,6 +94,8 @@ python main.py --show-data
 | `GEMINI_REQUEST_DELAY_SECONDS` | No | Pause between Gemini calls (default `8`) |
 | `GEMINI_RATE_LIMIT_COOLDOWN_SECONDS` | No | Extra pause after 429 recovery (default `30`) |
 | `GEMINI_MODEL_COOLDOWN_SECONDS` | No | Per-model cooldown after 429 before retry (default `300`) |
+| `TELEGRAM_BOT_TOKEN` | Yes (Telegram) | Bot token from [@BotFather](https://t.me/BotFather) |
+| `TELEGRAM_CHAT_ID` | Yes (Telegram) | Your chat id (`getUpdates` or [@userinfobot](https://t.me/userinfobot)) |
 | `API_HOST` / `API_PORT` | No | FastAPI bind (default `127.0.0.1:8000`) |
 | `NEXT_PUBLIC_API_URL` | No | Frontend API base (default `http://127.0.0.1:8000`) |
 
@@ -149,6 +154,52 @@ python main.py --run-scraper --source kitco --news-only
 - [ ] Dashboard loads chart, forecast tabs, news filter
 - [ ] Re-run `--forecast` skips with "cached" message
 - [ ] `--forecast --force-forecast` regenerates forecast
+
+## Deploy daily job (GitHub Actions — free)
+
+Chạy tự động **mỗi ngày 7:00 sáng giờ Việt Nam**, gửi báo cáo forecast qua Telegram. Không cần server 24/7.
+
+### 1. Push repo lên GitHub (public)
+
+Đảm bảo `.env` **không** được commit (đã có trong `.gitignore`).
+
+### 2. Thêm Secrets
+
+Repo → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**:
+
+| Secret | Mô tả |
+|--------|--------|
+| `GEMINI_API_KEY` | Google AI Studio API key |
+| `FRED_API_KEY` | FRED macro API key |
+| `TELEGRAM_BOT_TOKEN` | Telegram bot token |
+| `TELEGRAM_CHAT_ID` | Chat id nhận báo cáo |
+
+Optional **Variables** (tab Variables, không bắt buộc):
+
+- `GEMINI_SUMMARIZE_MODELS` — ví dụ `gemini-3.1-flash-lite,gemma-4-26b,...`
+- `GEMINI_FORECAST_MODELS` — ví dụ `gemini-3.5-flash,gemini-3.1-flash-lite,...`
+- `GEMINI_REQUEST_DELAY_SECONDS` — mặc định `8`
+- `SUMMARIZE_BATCH_LIMIT` — mặc định `100`
+
+### 3. Bật workflow
+
+Workflow: [`.github/workflows/daily-job.yml`](.github/workflows/daily-job.yml)
+
+- Lịch: `0 0 * * *` UTC = **07:00 Asia/Ho_Chi_Minh**
+- GitHub có thể trễ 5–15 phút — bình thường
+
+### 4. Test thủ công
+
+1. Tab **Actions** → **Daily Gold Forecast**
+2. **Run workflow** → **Run workflow**
+3. Mở job run → xem log; kiểm tra Telegram
+
+### 5. Lưu ý vận hành
+
+- Repo cần commit ít nhất 1 lần / 60 ngày để GitHub không tạm dừng schedule
+- Reuters/Bloomberg có thể fail trên IP datacenter — Kitco/CNBC/FED vẫn đủ cho báo cáo
+- Không lưu SQLite giữa các lần chạy (mỗi lần scrape + summarize mới từ đầu)
+- **Không** đưa API key vào code hoặc commit history
 
 ## Docker (optional)
 
