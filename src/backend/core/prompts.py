@@ -53,7 +53,7 @@ Quy tắc:
 - domestic_analysis: 5-8 câu phân tích vàng VN (SJC/9999, tỷ giá USD/VND, chênh lệch trong/ngoài, nhu cầu vật chất)
 - international_price_outlook: dự báo giá thế giới — xu hướng + khoảng USD/oz tham chiếu spot hiện tại (vd: duy trì 4.150-4.250), kèm % biến động ước tính theo ngày/tuần
 - domestic_price_outlook: dự báo vàng trong nước — xu hướng + khoảng VNĐ/lượng SJC hoặc % thay đổi so với hiện tại, giải thích mối liên hệ với XAU và tỷ giá
-- day/week/month/quarter.reasoning: 3-5 câu tiếng Việt, nêu driver từ tin tức và macro
+- day/week/month/quarter.reasoning: 3-5 câu tiếng Việt, CHỈ nêu driver (DXY, lãi suất, ETF, địa chính trị, sentiment) — KHÔNG ghi mức giá, USD/oz, hay con số dự báo
 - confidence: 0-100 cho toàn báo cáo
 - key_drivers: 3-6 yếu tố (mỗi mục 1 câu, gắn với tin hoặc macro)
 - risks: 2-5 rủi ro cần theo dõi"""

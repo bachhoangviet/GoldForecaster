@@ -2,13 +2,35 @@
 
 from __future__ import annotations
 
+import re
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 Sentiment = Literal["bullish", "bearish", "neutral"]
 Trend = Literal["up", "down", "sideways"]
 Horizon = Literal["day", "week", "month", "quarter"]
+
+_FORECAST_REASONING_FALLBACK = (
+    "Xu hướng dựa trên driver vĩ mô và sentiment tin tức trong ngày."
+)
+
+_BANNED_REASONING_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\$"),
+    re.compile(r"usd\s*/?\s*oz", re.IGNORECASE),
+    re.compile(r"price\s+target", re.IGNORECASE),
+    re.compile(r"will\s+reach", re.IGNORECASE),
+    re.compile(r"predicted\s+price", re.IGNORECASE),
+)
+
+
+def sanitize_reasoning_for_forecast(text: str) -> str:
+    """Strip price-target tokens so report horizon reasoning fits HorizonForecast."""
+    cleaned = text[:500]
+    for pattern in _BANNED_REASONING_PATTERNS:
+        cleaned = pattern.sub(" ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned[:500]
 
 
 class ArticleSummaryResult(BaseModel):
@@ -99,12 +121,19 @@ class DailyGoldReport(BaseModel):
         """Map report horizons to dashboard forecast rows."""
 
         def _map(h: ReportHorizonForecast) -> HorizonForecast:
-            reasoning = h.reasoning[:500].replace("$", "")
-            return HorizonForecast(
-                trend=h.trend,
-                confidence=h.confidence,
-                reasoning=reasoning,
-            )
+            reasoning = sanitize_reasoning_for_forecast(h.reasoning)
+            try:
+                return HorizonForecast(
+                    trend=h.trend,
+                    confidence=h.confidence,
+                    reasoning=reasoning,
+                )
+            except ValidationError:
+                return HorizonForecast(
+                    trend=h.trend,
+                    confidence=h.confidence,
+                    reasoning=_FORECAST_REASONING_FALLBACK,
+                )
 
         return ForecastResult(
             day=_map(self.day),
